@@ -1012,10 +1012,10 @@ Need assistance? Contact the bot administrator.
 # Main execution
 if __name__ == "__main__":
     # Replace with your actual values
-    BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # From BotFather
-    OWNER_ID = 123456789  # Your Telegram user ID
-    API_ID = 123456  # Your Telegram API ID from https://my.telegram.org
-    API_HASH = "your_api_hash_here"  # Your Telegram API Hash
+    BOT_TOKEN = "7738808803:AAH7M8lNwGb5UAUHA0yl8-xvy-C3yZEJ7hc"  # From BotFather
+    OWNER_ID = 6651946441  # Your Telegram user ID
+    API_ID = 27631275  # Your Telegram API ID from https://my.telegram.org
+    API_HASH = "d15c8c4c88a5b82aab6a673eff8ca244"  # Your Telegram API Hash
     
     # Optional: Configure SMS service for OTP delivery
     # SMS_SERVICE = SomeSmsService(api_key="your_api_key")
