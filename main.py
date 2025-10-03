@@ -20,11 +20,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Bot Token (Replace with your actual token)
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+# Environment variables से fetch करें
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_IDS = os.getenv('ADMIN_IDS', '').split(',')
 
-# Admin IDs (Replace with your Telegram user ID)
-ADMIN_IDS = os.getenv('ADMIN_IDS', 'YOUR_USER_ID').split(',')
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN environment variable not set!")
 
 # Initialize bot and database
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
