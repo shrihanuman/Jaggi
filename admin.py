@@ -11,10 +11,16 @@ from database import DatabaseManager
 logger = logging.getLogger(__name__)
 
 class AdminPanel:
-    def __init__(self, bot_token, admin_ids):
-        self.bot = telebot.TeleBot(bot_token)
+    def __init__(self, bot_token=None, admin_ids=None):
+        # Get from environment variables if not provided
+        self.bot_token = bot_token or os.getenv('BOT_TOKEN')
+        self.admin_ids = admin_ids or os.getenv('ADMIN_IDS', '').split(',')
+        
+        if not self.bot_token:
+            raise ValueError("Bot token not found in environment variables")
+        
+        self.bot = telebot.TeleBot(self.bot_token)
         self.db = DatabaseManager()
-        self.admin_ids = admin_ids  # List of admin user IDs
         
         # Setup admin handlers
         self.setup_admin_handlers()
@@ -76,6 +82,24 @@ class AdminPanel:
                 self.show_downloads(call)
             elif call.data == 'back_to_admin':
                 self.back_to_admin(call)
+            
+            # Handle setting toggles
+            elif call.data == 'toggle_status':
+                self.toggle_bot_status(call)
+            elif call.data == 'toggle_maintenance':
+                self.toggle_maintenance(call)
+            
+            # Handle user management
+            elif call.data == 'all_users':
+                self.show_all_users(call)
+            elif call.data == 'export_users':
+                self.export_users(call)
+            
+            # Handle force subscribe
+            elif call.data == 'add_channel':
+                self.add_channel_prompt(call)
+            elif call.data == 'remove_channel':
+                self.remove_channel_menu(call)
     
     def show_statistics(self, call):
         """Show bot statistics"""
@@ -125,7 +149,8 @@ class AdminPanel:
 """
         
         for i, user in enumerate(recent_users, 1):
-            users_text += f"{i}. {user['first_name']} (@{user['username']}) - {user['download_count']} downloads\n"
+            username = f"@{user['username']}" if user['username'] else "No username"
+            users_text += f"{i}. {user['first_name']} ({username}) - {user['download_count']} downloads\n"
         
         keyboard = InlineKeyboardMarkup()
         keyboard.row(
@@ -141,6 +166,51 @@ class AdminPanel:
             reply_markup=keyboard,
             parse_mode='HTML'
         )
+    
+    def show_all_users(self, call):
+        """Show all users with pagination"""
+        users = self.db.get_all_users()
+        
+        users_text = f"👥 <b>All Users ({len(users)})</b>\n\n"
+        
+        for i, user in enumerate(users[:50], 1):  # Show first 50 users
+            username = f"@{user['username']}" if user['username'] else "No username"
+            users_text += f"{i}. {user['first_name']} ({username}) - {user['download_count']} downloads\n"
+        
+        if len(users) > 50:
+            users_text += f"\n... and {len(users) - 50} more users"
+        
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("⬅️ Back", callback_data="admin_users"))
+        
+        self.bot.edit_message_text(
+            users_text,
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+    
+    def export_users(self, call):
+        """Export users data"""
+        users = self.db.get_all_users()
+        
+        if not users:
+            self.bot.answer_callback_query(call.id, "No users to export!")
+            return
+        
+        # Create CSV data
+        csv_data = "User ID,Username,First Name,Join Date,Downloads\n"
+        for user in users:
+            csv_data += f"{user['user_id']},{user['username'] or 'N/A'},{user['first_name']},{user['join_date']},{user['download_count']}\n"
+        
+        # Send as file
+        self.bot.send_document(
+            call.message.chat.id,
+            ('users.csv', csv_data.encode()),
+            caption=f"📊 Users Export - {len(users)} users"
+        )
+        self.bot.answer_callback_query(call.id, "Users data exported!")
     
     def broadcast_menu(self, call):
         """Broadcast message menu"""
@@ -183,6 +253,27 @@ class AdminPanel:
             parse_mode='HTML'
         )
     
+    def toggle_bot_status(self, call):
+        """Toggle bot status"""
+        current_status = self.db.get_setting('bot_status', 'active')
+        new_status = 'inactive' if current_status == 'active' else 'active'
+        
+        self.db.update_setting('bot_status', new_status)
+        
+        self.bot.answer_callback_query(call.id, f"Bot status changed to {new_status}")
+        self.settings_menu(call)
+    
+    def toggle_maintenance(self, call):
+        """Toggle maintenance mode"""
+        current_mode = self.db.get_setting('maintenance_mode', 'false')
+        new_mode = 'true' if current_mode == 'false' else 'false'
+        
+        self.db.update_setting('maintenance_mode', new_mode)
+        
+        mode_text = "enabled" if new_mode == 'true' else "disabled"
+        self.bot.answer_callback_query(call.id, f"Maintenance mode {mode_text}")
+        self.settings_menu(call)
+    
     def force_subscribe_menu(self, call):
         """Force subscribe management menu"""
         channels = self.db.get_force_subscribe_channels()
@@ -204,6 +295,77 @@ class AdminPanel:
         
         self.bot.edit_message_text(
             channels_text,
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+    
+    def add_channel_prompt(self, call):
+        """Prompt to add channel"""
+        self.bot.edit_message_text(
+            "🔗 <b>Add Force Subscribe Channel</b>\n\n"
+            "Please send channel information in this format:\n"
+            "<code>channel_id channel_name channel_link</code>\n\n"
+            "<b>Example:</b>\n"
+            "<code>-1001234567890 My_Channel https://t.me/my_channel</code>\n\n"
+            "<b>How to get channel ID:</b>\n"
+            "1. Add your bot to the channel as admin\n"
+            "2. Send any message in channel\n"
+            "3. Forward that message to @userinfobot\n"
+            "4. Copy the channel ID (starts with -100)",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='HTML'
+        )
+        
+        # Register next step handler
+        self.bot.register_next_step_handler(call.message, self.process_add_channel)
+    
+    def process_add_channel(self, message):
+        """Process adding channel"""
+        try:
+            parts = message.text.split(' ', 2)
+            if len(parts) != 3:
+                self.bot.reply_to(message, "❌ Invalid format! Use: channel_id channel_name channel_link")
+                return
+            
+            channel_id, channel_name, channel_link = parts
+            
+            # Validate channel ID
+            if not channel_id.startswith('-100'):
+                self.bot.reply_to(message, "❌ Invalid channel ID! Must start with -100")
+                return
+            
+            # Add channel to database
+            if self.db.add_force_subscribe_channel(channel_id, channel_name, channel_link):
+                self.bot.reply_to(message, f"✅ Channel '{channel_name}' added successfully!")
+            else:
+                self.bot.reply_to(message, "❌ Failed to add channel!")
+                
+        except Exception as e:
+            self.bot.reply_to(message, f"❌ Error: {str(e)}")
+    
+    def remove_channel_menu(self, call):
+        """Show remove channel menu"""
+        channels = self.db.get_force_subscribe_channels()
+        
+        if not channels:
+            self.bot.answer_callback_query(call.id, "No channels to remove!")
+            return
+        
+        keyboard = InlineKeyboardMarkup()
+        for channel in channels:
+            keyboard.add(InlineKeyboardButton(
+                f"Remove {channel['channel_name']}",
+                callback_data=f"remove_{channel['channel_id']}"
+            ))
+        
+        keyboard.add(InlineKeyboardButton("⬅️ Back", callback_data="admin_force_sub"))
+        
+        self.bot.edit_message_text(
+            "🔗 <b>Remove Force Subscribe Channel</b>\n\n"
+            "Select a channel to remove:",
             call.message.chat.id,
             call.message.message_id,
             reply_markup=keyboard,
@@ -261,13 +423,16 @@ class AdminPanel:
     def start_admin_panel(self):
         """Start the admin panel"""
         logger.info("Admin panel started")
-        self.bot.polling(none_stop=True)
+        try:
+            self.bot.polling(none_stop=True)
+        except Exception as e:
+            logger.error(f"Admin panel error: {e}")
+            # Restart after delay
+            import time
+            time.sleep(10)
+            self.start_admin_panel()
 
-# Usage example
+# Usage - Environment variables se automatically fetch hoga
 if __name__ == "__main__":
-    # Add your bot token and admin user IDs
-    BOT_TOKEN = "YOUR_ADMIN_BOT_TOKEN"
-    ADMIN_IDS = ["YOUR_USER_ID"]  # Your Telegram user ID
-    
-    admin_panel = AdminPanel(BOT_TOKEN, ADMIN_IDS)
+    admin_panel = AdminPanel()
     admin_panel.start_admin_panel()
